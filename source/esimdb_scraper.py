@@ -52,7 +52,7 @@ def get_json(
     """
     Perform a GET request with simple retry logic and return parsed JSON.
 
-    Uses exponential backoff with jitter between retries. (1)
+    Uses exponential backoff with jitter between retries.
     """
     session = get_session()
 
@@ -122,8 +122,8 @@ def fetch_countries(locale: str = "en") -> List[Dict[str, Any]]:
 
 
 def iter_country_plans(
-    country_slug: str,
-    locale: str = "en",
+        country_slug: str,
+        locale: str = "en",
 ) -> Iterable[Tuple[Dict[str, Any], str]]:
     """
     Iterate over all plans for a country, across all pages.
@@ -133,11 +133,12 @@ def iter_country_plans(
     Example endpoint:
         /api/client/countries/france/data-plans?page=1&locale=en
 
+    Deduplicates plans across all pages based on plan ID.
     """
     page = 1
     number_of_pages: Optional[int] = None
 
-    seen_plan_ids: set = set()  # for deduplication between plans & featured
+    seen_plan_ids: set = set()
 
     while number_of_pages is None or page <= number_of_pages:
         url = f"{BASE_API}/countries/{country_slug}/data-plans"
@@ -160,13 +161,16 @@ def iter_country_plans(
 
         combined_plans = plans_main + plans_featured
 
-        # Deduplicate based on a plan ID if available
+        # Deduplicate based on plan ID across all pages
         for plan in combined_plans:
             plan_id = plan.get("id")
+
+            # If plan has an ID, use it for deduplication
             if plan_id is not None:
                 if plan_id in seen_plan_ids:
                     continue
                 seen_plan_ids.add(plan_id)
+            # If no ID, we can't deduplicate reliably, so yield it anyway
 
             provider_id = plan.get("provider")
             provider_name = ""
