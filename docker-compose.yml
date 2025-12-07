@@ -1,0 +1,7 @@
+services:
+  esimdb-scraper:
+    build: .
+    container_name: esimdb_scraper
+    volumes:
+      - ./esimdb_data:/app/esimdb_data
+    restart: unless-stopped
