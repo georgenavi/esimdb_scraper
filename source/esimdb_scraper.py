@@ -426,14 +426,26 @@ def scrape_country(
     return True, len(df)
 
 
-def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
+def main(
+    output_dir: str = "esimdb_data",
+    locale: str = "en",
+    stop_event: Optional[object] = None,
+) -> None:
     """
     Orchestrate the full scraping process.
 
     - Fetches list of countries.
     - Iterates through each country (in parallel via multiprocessing) and scrapes data plans.
     - Writes a Parquet file per country into a date-based subdirectory.
+    - Respects optional stop_event for graceful shutdown.
     """
+
+    def should_stop() -> bool:
+        return stop_event is not None and getattr(stop_event, "is_set", lambda: False)()
+
+    if should_stop():
+        logger.warning("Shutdown already requested before start, exiting main() early")
+        return
 
     today = datetime.now().strftime("%Y%m%d")
     logger.info("Run date: %s", today)
@@ -441,6 +453,10 @@ def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
 
     countries = fetch_countries(locale=locale)
     logger.info("Found %d countries", len(countries))
+
+    if should_stop():
+        logger.warning("Shutdown requested after fetching countries, exiting before processing")
+        return
 
     # Create output directory structure
     script_dir = Path(__file__).parent
@@ -458,30 +474,55 @@ def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
 
     # Use ProcessPoolExecutor for multiprocessing
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        if should_stop():
+            logger.warning("Shutdown requested before submitting tasks, skipping execution")
+            return
+
         future_to_country = {
             executor.submit(scrape_country, country, output_path, locale, today): country
             for country in countries
         }
 
-        for future in as_completed(future_to_country):
-            country = future_to_country[future]
-            name = country["name"]
-            slug = country["slug"]
+        try:
+            for future in as_completed(future_to_country):
+                if should_stop():
+                    logger.warning("Shutdown requested, cancelling remaining country tasks...")
+                    for f in future_to_country.keys():
+                        if not f.done():
+                            f.cancel()
+                    break
 
-            try:
-                success, num_plans = future.result()
-                if success:
-                    successful += 1
-                else:
+                country = future_to_country[future]
+                name = country["name"]
+                slug = country["slug"]
+
+                try:
+                    success, num_plans = future.result()
+                    if success:
+                        successful += 1
+                    else:
+                        failed += 1
+                    total_plans += num_plans
+                    logger.info(
+                        "Finished %s (slug=%s), plans=%d, success=%s",
+                        name, slug, num_plans, success,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "Failed to process %s (slug=%s) in worker: %s",
+                        name, slug, e, exc_info=True,
+                    )
                     failed += 1
-                total_plans += num_plans
-                logger.info(
-                    "Finished %s (slug=%s), plans=%d, success=%s",name, slug, num_plans, success)
-            except Exception as e:
-                logger.error("Failed to process %s (slug=%s) in worker: %s",name, slug, e, exc_info=True)
-                failed += 1
+        finally:
+            # При любом выходе — если был запрос на остановку, аккуратно логируем
+            if should_stop():
+                logger.warning(
+                    "Scraping interrupted by shutdown request. "
+                    "Processed: success=%d, failed=%d, total_plans=%d",
+                    successful, failed, total_plans,
+                )
 
-    logger.info("Scraping complete!")
-    logger.info("Countries successful: %d/%d", successful, len(countries))
-    logger.info("Countries failed: %d/%d", failed, len(countries))
-    logger.info("Total plans scraped: %d", total_plans)
+            logger.info("Scraping complete!")
+            logger.info("Countries successful: %d/%d", successful, len(countries))
+            logger.info("Countries failed: %d/%d", failed, len(countries))
+            logger.info("Total plans scraped: %d", total_plans)
