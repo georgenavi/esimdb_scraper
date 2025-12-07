@@ -1,0 +1,6 @@
+# Core dependencies
+requests>=2.31.0,<3.0.0
+pandas>=2.0.0,<3.0.0
+
+# Parquet support for pandas
+pyarrow>=14.0.0,<15.0.0
