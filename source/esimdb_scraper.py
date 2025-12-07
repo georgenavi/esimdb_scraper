@@ -183,85 +183,164 @@ def iter_country_plans(
         time.sleep(PLANS_REQUEST_DELAY_SECONDS)
 
 
-def validate_plan(
-    plan: Dict[str, Any],
-    provider_name: str,
-    country_name: str,
-    country_region: str,
-) -> Dict[str, Any]:
+def validate_price(plan: Dict[str, Any], country_name: str) -> Optional[float]:
     """
-    Validate and normalize fields:
+    Extract and validate USD price from plan data.
 
-    - Country
-    - Region
-    - Price (in USD)
-    - Data allowance (in GB)
-    - Validity (in days)
-    - Provider/Operator name
+    Returns rounded price (2 decimal places) or None if invalid.
     """
     usd_price = plan.get("usdPromoPrice")
     if usd_price is None:
         usd_price = plan.get("usdPrice")
-
     if usd_price is None:
         prices = plan.get("prices") or {}
         usd_price = prices.get("USD")
 
-    capacity = plan.get("capacity")
-    capacity_unit = plan.get("capacityUnit")  # if the API happens to provide it
-    data_gb: Optional[float] = None
+    if usd_price is None:
+        return None
 
-    if isinstance(capacity, (int, float)) and capacity > 0:
+    try:
+        usd_price = float(usd_price)
+        if usd_price < 0:
+            logger.warning(
+                "Negative price (%.2f) for plan in %s; setting to None",
+                usd_price,
+                country_name,
+            )
+            return None
+        elif usd_price == 0:
+            logger.debug("Zero price for plan in %s", country_name)
+
+        return round(usd_price, 2)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid price value '%s' for plan in %s; setting to None",
+            usd_price,
+            country_name,
+        )
+        return None
+
+
+def validate_data_capacity(plan: Dict[str, Any], country_name: str) -> Optional[float]:
+    """
+    Extract and validate data capacity from plan data.
+
+    Converts to GB and returns rounded value (2 decimal places) or None if invalid.
+    """
+    capacity = plan.get("capacity")
+    capacity_unit = plan.get("capacityUnit")
+
+    if capacity is None:
+        return None
+
+    try:
+        capacity = float(capacity)
+        if capacity <= 0:
+            logger.warning(
+                "Non-positive capacity (%.2f) for plan in %s; setting to None",
+                capacity, country_name,
+            )
+            return None
+
+        # Convert to GB based on unit
+        data_gb: Optional[float] = None
+
         if isinstance(capacity_unit, str):
             unit = capacity_unit.lower()
             if unit in ("mb", "mib"):
-                data_gb = float(capacity) / 1000.0
+                data_gb = capacity / 1000.0
             elif unit in ("gb", "gib"):
-                data_gb = float(capacity)
+                data_gb = capacity
+            elif unit in ("tb", "tib"):
+                data_gb = capacity * 1000.0
             else:
-                # Unknown unit, fall back to heuristic
-                data_gb = float(capacity) / 1000.0
-                logger.warning(
-                    "Unknown capacityUnit '%s' for plan in %s; assuming MB.",
-                    capacity_unit,
-                    country_name,
+                logger.warning("Unknown capacityUnit '%s' for plan in %s (capacity: %.2f); setting to None",
+                    capacity_unit, country_name, capacity
                 )
+                return None
         else:
-            # Heuristic: small numbers probably GB, large numbers MB
-            if capacity <= 25:
-                data_gb = float(capacity)
-            else:
-                data_gb = float(capacity) / 1000.0
+            logger.warning( "Missing capacityUnit for plan in %s (capacity: %.2f); setting to None",
+                            country_name, capacity
+            )
+            return None
 
-        if data_gb is not None and data_gb > 25:
+        # Sanity check on data size
+        if data_gb > 1000:
             logger.warning(
                 "Suspiciously large data capacity (%.2f GB) for plan in %s",
                 data_gb,
                 country_name,
             )
 
-    validity_raw = plan.get("period")
-    validity_days: Optional[int]
-    try:
-        validity_days = int(validity_raw) if validity_raw is not None else None
+        return round(data_gb, 2)
     except (TypeError, ValueError):
-        logger.warning(
-            "Invalid validity period '%s' for plan in %s; setting to None",
-            validity_raw,
-            country_name,
-        )
-        validity_days = None
+        logger.warning("Invalid capacity value '%s' for plan in %s; setting to None", capacity, country_name)
+        return None
 
+
+def validate_validity_period(plan: Dict[str, Any], country_name: str) -> Optional[int]:
+    """
+    Extract and validate validity period (in days) from plan data.
+
+    Returns positive integer or None if invalid.
+    """
+    validity_raw = plan.get("period")
+
+    if validity_raw is None:
+        return None
+
+    try:
+        validity_days = int(validity_raw)
+        if validity_days <= 0:
+            logger.warning("Non-positive validity period (%d) for plan in %s; setting to None",
+                           validity_days, country_name)
+            return None
+
+        return validity_days
+    except (TypeError, ValueError):
+        logger.warning("Invalid validity period '%s' for plan in %s; setting to None",
+                       validity_raw, country_name)
+        return None
+
+
+def validate_plan_name(plan: Dict[str, Any], country_name: str) -> str:
+    """
+    Extract and validate plan name.
+
+    Returns cleaned plan name or empty string if invalid.
+    """
     plan_name = plan.get("enName") or plan.get("name") or ""
 
+    if isinstance(plan_name, str):
+        return plan_name.strip()
+
+    logger.warning(
+        "Invalid plan name '%s' for plan in %s; using empty string", type(plan_name).__name__, country_name,)
+    return ""
+
+
+def validate_plan(
+        plan: Dict[str, Any],
+        provider_name: str,
+        country_name: str,
+        country_region: str,
+) -> Dict[str, Any]:
+    """
+    Validate and normalize all plan fields.
+
+    Returns dictionary with validated fields:
+    - country, region, provider, plan_name (strings)
+    - price_usd, data_gb (floats or None)
+    - validity_days (int or None)
+    """
     return {
         "country": country_name,
         "region": country_region,
         "provider": provider_name,
-        "plan_name": plan_name,
-        "price_usd": usd_price,
-        "data_gb": data_gb,
-        "validity_days": validity_days,
+        "plan_name": validate_plan_name(plan, country_name),
+        "price_usd": validate_price(plan, country_name),
+        "data_gb": validate_data_capacity(plan, country_name),
+        "validity_days": validate_validity_period(plan, country_name),
     }
 
 
