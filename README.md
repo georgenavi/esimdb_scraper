@@ -171,6 +171,8 @@ esimdb_data/
     ...
 ```
 
+It is assumed that the data will be loaded from files into the DWH table or combined into one large file for analysis.
+
 **Benefits:**
 - No risk of data corruption from concurrent writes
 - Each scrape is isolated and traceable
@@ -279,7 +281,7 @@ Examples:
 ```python
 import pandas as pd
 
-df = pd.read_parquet('esimdb_data/20241207/france.parquet')
+df = pd.read_parquet('esimdb_data/20251207/france.parquet')
 print(df.head())
 ```
 
@@ -288,7 +290,7 @@ print(df.head())
 import pandas as pd
 from pathlib import Path
 
-date_dir = Path('esimdb_data/20241207')
+date_dir = Path('esimdb_data/20251207')
 dfs = []
 for file in date_dir.glob('*.parquet'):
     dfs.append(pd.read_parquet(file))
