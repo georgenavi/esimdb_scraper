@@ -433,7 +433,6 @@ def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
     - Iterates through each country (in parallel via multiprocessing) and scrapes data plans.
     - Writes a Parquet file per country into a date-based subdirectory.
     """
-    logger.info("Starting eSIMDB scraper")
 
     today = datetime.now().strftime("%Y%m%d")
     logger.info("Run date: %s", today)
@@ -481,11 +480,7 @@ def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
                 logger.error("Failed to process %s (slug=%s) in worker: %s",name, slug, e, exc_info=True)
                 failed += 1
 
-    logger.info("=" * 60)
     logger.info("Scraping complete!")
     logger.info("Countries successful: %d/%d", successful, len(countries))
     logger.info("Countries failed: %d/%d", failed, len(countries))
     logger.info("Total plans scraped: %d", total_plans)
-
-if __name__ == "__main__":
-    main()
