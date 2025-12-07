@@ -10,7 +10,7 @@ import requests
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 BASE_API = "https://esimdb.com/api/client"
-DEFAULT_USER_AGENT = "esimdb-scraper/1.0 (+https://example.com)"
+DEFAULT_USER_AGENT = "esimdb-scraper/1.0 (+https://github.com/georgenavi/esimdb_scraper)"
 REQUEST_TIMEOUT_SECONDS = 30
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
