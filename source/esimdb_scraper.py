@@ -15,6 +15,7 @@ REQUEST_TIMEOUT_SECONDS = 30
 RETRY_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 PLANS_REQUEST_DELAY_SECONDS = 0.2
+MAX_WORKERS = 5
 
 SCHEMA_VERSION = "1.0"
 
@@ -452,7 +453,7 @@ def main(output_dir: str = "esimdb_data", locale: str = "en") -> None:
     failed = 0
     total_plans = 0
 
-    max_workers = min(5, len(countries))
+    max_workers = min(MAX_WORKERS, len(countries))
     logger.info("Processing countries in parallel with %d workers", max_workers)
 
     # Use ProcessPoolExecutor for multiprocessing
