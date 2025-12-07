@@ -235,7 +235,7 @@ def validate_data_capacity(plan: Dict[str, Any], country_name: str) -> Optional[
 
     try:
         capacity = float(capacity)
-        if capacity <= 0:
+        if capacity < 0:
             logger.warning(
                 "Non-positive capacity (%.2f) for plan in %s; setting to None",
                 capacity, country_name,
@@ -245,7 +245,7 @@ def validate_data_capacity(plan: Dict[str, Any], country_name: str) -> Optional[
         # Convert to GB based on unit
         data_gb: Optional[float] = None
 
-        if isinstance(capacity, (int, float)) and capacity > 0:
+        if isinstance(capacity, (int, float)) and capacity >= 0:
             if isinstance(capacity_unit, str):
                 unit = capacity_unit.lower()
                 if unit in ("mb", "mib"):
@@ -294,7 +294,7 @@ def validate_validity_period(plan: Dict[str, Any], country_name: str) -> Optiona
 
     try:
         validity_days = int(validity_raw)
-        if validity_days <= 0:
+        if validity_days < 0:
             logger.warning("Non-positive validity period (%d) for plan in %s; setting to None",
                            validity_days, country_name)
             return None
