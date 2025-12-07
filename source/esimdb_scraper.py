@@ -245,24 +245,27 @@ def validate_data_capacity(plan: Dict[str, Any], country_name: str) -> Optional[
         # Convert to GB based on unit
         data_gb: Optional[float] = None
 
-        if isinstance(capacity_unit, str):
-            unit = capacity_unit.lower()
-            if unit in ("mb", "mib"):
-                data_gb = capacity / 1000.0
-            elif unit in ("gb", "gib"):
-                data_gb = capacity
-            elif unit in ("tb", "tib"):
-                data_gb = capacity * 1000.0
+        if isinstance(capacity, (int, float)) and capacity > 0:
+            if isinstance(capacity_unit, str):
+                unit = capacity_unit.lower()
+                if unit in ("mb", "mib"):
+                    data_gb = float(capacity) / 1000.0
+                elif unit in ("gb", "gib"):
+                    data_gb = float(capacity)
+                else:
+                    # Unknown unit, fall back to heuristic
+                    data_gb = float(capacity) / 1000.0
+                    logger.warning(
+                        "Unknown capacityUnit '%s' for plan in %s; assuming MB.",
+                        capacity_unit,
+                        country_name,
+                    )
             else:
-                logger.warning("Unknown capacityUnit '%s' for plan in %s (capacity: %.2f); setting to None",
-                    capacity_unit, country_name, capacity
-                )
-                return None
-        else:
-            logger.warning( "Missing capacityUnit for plan in %s (capacity: %.2f); setting to None",
-                            country_name, capacity
-            )
-            return None
+                # Heuristic: small numbers probably GB, large numbers MB
+                if capacity <= 25:
+                    data_gb = float(capacity)
+                else:
+                    data_gb = float(capacity) / 1000.0
 
         # Sanity check on data size
         if data_gb > 1000:
