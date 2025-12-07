@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 import requests
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 BASE_API = "https://esimdb.com/api/client"
@@ -364,14 +365,10 @@ def scrape_country(
     country: Dict[str, Any],
     output_path: Path,
     locale: str,
-    scrape_date: str,
-) -> Tuple[bool, int]:
-    """
-    Scrape all plans for a single country and write them to a Parquet file.
+    scrape_date: str
+) -> tuple[bool, int]:
+    """Worker function that checks stop_event periodically."""
 
-    Returns (success_flag, num_plans_written).
-    Applies per-plan error handling so bad plans don't kill the country.
-    """
     slug = country["slug"]
     country_name = country["name"]
     region = country["region"]
@@ -427,38 +424,33 @@ def scrape_country(
 
 
 def main(
-    output_dir: str = "esimdb_data",
-    locale: str = "en",
-    stop_event: Optional[object] = None,
+        output_dir: str = "esimdb_data",
+        locale: str = "en",
+        stop_event: Optional[mp.Event] = None
 ) -> None:
     """
-    Orchestrate the full scraping process.
-
-    - Fetches list of countries.
-    - Iterates through each country (in parallel via multiprocessing) and scrapes data plans.
-    - Writes a Parquet file per country into a date-based subdirectory.
-    - Respects optional stop_event for graceful shutdown.
+    Orchestrate the full scraping process with graceful shutdown support.
     """
+    if stop_event is None:
+        stop_event = mp.Event()
 
     def should_stop() -> bool:
-        return stop_event is not None and getattr(stop_event, "is_set", lambda: False)()
+        return stop_event.is_set()
 
     if should_stop():
-        logger.warning("Shutdown already requested before start, exiting main() early")
+        logger.warning("Shutdown already requested, exiting early")
         return
 
     today = datetime.now().strftime("%Y%m%d")
     logger.info("Run date: %s", today)
-    logger.info("Fetching countries...")
 
     countries = fetch_countries(locale=locale)
     logger.info("Found %d countries", len(countries))
 
     if should_stop():
-        logger.warning("Shutdown requested after fetching countries, exiting before processing")
+        logger.warning("Shutdown requested after fetching countries")
         return
 
-    # Create output directory structure
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
     output_path = project_root / output_dir / today
@@ -470,12 +462,11 @@ def main(
     total_plans = 0
 
     max_workers = min(MAX_WORKERS, len(countries))
-    logger.info("Processing countries in parallel with %d workers", max_workers)
+    logger.info("Processing countries with %d workers", max_workers)
 
-    # Use ProcessPoolExecutor for multiprocessing
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         if should_stop():
-            logger.warning("Shutdown requested before submitting tasks, skipping execution")
+            logger.warning("Shutdown before submitting tasks")
             return
 
         future_to_country = {
@@ -483,46 +474,44 @@ def main(
             for country in countries
         }
 
-        try:
-            for future in as_completed(future_to_country):
-                if should_stop():
-                    logger.warning("Shutdown requested, cancelling remaining country tasks...")
-                    for f in future_to_country.keys():
-                        if not f.done():
-                            f.cancel()
-                    break
-
-                country = future_to_country[future]
-                name = country["name"]
-                slug = country["slug"]
-
-                try:
-                    success, num_plans = future.result()
-                    if success:
-                        successful += 1
-                    else:
-                        failed += 1
-                    total_plans += num_plans
-                    logger.info(
-                        "Finished %s (slug=%s), plans=%d, success=%s",
-                        name, slug, num_plans, success,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "Failed to process %s (slug=%s) in worker: %s",
-                        name, slug, e, exc_info=True,
-                    )
-                    failed += 1
-        finally:
-            # При любом выходе — если был запрос на остановку, аккуратно логируем
+        for future in as_completed(future_to_country):
             if should_stop():
-                logger.warning(
-                    "Scraping interrupted by shutdown request. "
-                    "Processed: success=%d, failed=%d, total_plans=%d",
-                    successful, failed, total_plans,
-                )
+                logger.warning("Shutdown requested, cancelling remaining tasks...")
+                for f in future_to_country.keys():
+                    f.cancel()
+                break
 
-            logger.info("Scraping complete!")
-            logger.info("Countries successful: %d/%d", successful, len(countries))
-            logger.info("Countries failed: %d/%d", failed, len(countries))
-            logger.info("Total plans scraped: %d", total_plans)
+            country = future_to_country[future]
+            name = country["name"]
+            slug = country["slug"]
+
+            try:
+                success, num_plans = future.result(timeout=300)
+                if success:
+                    successful += 1
+                else:
+                    failed += 1
+                total_plans += num_plans
+                logger.info(
+                    "Finished %s (slug=%s), plans=%d, success=%s",
+                    name, slug, num_plans, success,
+                )
+            except TimeoutError:
+                logger.error("Task timed out for %s (slug=%s)", name, slug)
+                failed += 1
+            except Exception as e:
+                logger.error(
+                    "Failed to process %s (slug=%s): %s",
+                    name, slug, e, exc_info=True,
+                )
+                failed += 1
+
+    # Context manager has completed - executor is shut down
+    if should_stop():
+        logger.warning("Scraping interrupted by shutdown request")
+    else:
+        logger.info("Scraping complete!")
+
+    logger.info("Countries successful: %d/%d", successful, len(countries))
+    logger.info("Countries failed: %d/%d", failed, len(countries))
+    logger.info("Total plans scraped: %d", total_plans)
