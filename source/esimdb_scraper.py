@@ -228,12 +228,12 @@ def validate_plan(
                 )
         else:
             # Heuristic: small numbers probably GB, large numbers MB
-            if capacity <= 100:
+            if capacity <= 25:
                 data_gb = float(capacity)
             else:
                 data_gb = float(capacity) / 1000.0
 
-        if data_gb is not None and data_gb > 1000:
+        if data_gb is not None and data_gb > 25:
             logger.warning(
                 "Suspiciously large data capacity (%.2f GB) for plan in %s",
                 data_gb,
