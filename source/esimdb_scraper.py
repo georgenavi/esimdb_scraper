@@ -486,7 +486,7 @@ def main(
             slug = country["slug"]
 
             try:
-                success, num_plans = future.result(timeout=300)
+                success, num_plans = future.result(timeout=3)
                 if success:
                     successful += 1
                 else:
